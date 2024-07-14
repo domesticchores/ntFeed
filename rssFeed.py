@@ -11,13 +11,16 @@ import time
 LocalDir = Path(__file__).parent
 os.chdir(LocalDir)
 
-DBuser = os.environ['dbuser']
-DBpass = os.environ['dbpass']
+if 'POSTGRES_PASSWORD_FILE' in os.environ:
+   with open(os.environ['POSTGRES_PASSWORD_FILE'], 'r') as f:
+       DBpass = f.read().strip()
+else:
+   DBpass = os.environ['POSTGRES_PASSWORD']
 REDDIT_RSS_URL = os.environ['redditurl']
 NTFY_URL = os.environ['ntfyurl']
 MINUTES_BEFORE_LOOP = os.environ['minutesbeforeloop']
 
-print(DBuser,DBpass,REDDIT_RSS_URL,NTFY_URL,MINUTES_BEFORE_LOOP)
+print("postgres",DBpass,REDDIT_RSS_URL,NTFY_URL,MINUTES_BEFORE_LOOP)
 
 #define headers for requests to use; predefined for ease of use
 headers = {
@@ -31,9 +34,20 @@ class rssFeed:
         print("Initiating RSS Reader...")
         self.url = rss_url
         self.headers = headers
-
+        # connect to postgres to create database
         try:
-            self.connection = psycopg.connect(dbname="rssFeed",user=DBuser,password=DBpass)
+            initConn = psycopg.connect(host="db", user="postgres", password=DBpass)
+            initConn.set_session(autocommit=True)
+            with initConn.cursor() as cur:
+                cur.execute("CREATE DATABASE IF NOT EXISTS rssFeed")
+            initConn.close()
+        except Exception as e:
+            print("An error occured whilst initializing database:")
+            print(e)
+            quit()
+        # once db is created, attempt to create table to store data
+        try:
+            self.connection = psycopg.connect(host="db",user="postgres",password=DBpass,database="rssFeed")
             with self.connection.cursor() as cur:
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS posts (
@@ -45,9 +59,8 @@ class rssFeed:
                         pubdate timestamp)
                     """)
         except Exception as e:
-            print("An error occured whilst initializing database:")
+            print("error connecting to table:")
             print(e)
-            quit()
         # use requests module to download the rss feed data
         try:
             self.r = requests.get(rss_url, headers=self.headers)
